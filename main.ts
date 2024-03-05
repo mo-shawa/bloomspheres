@@ -6,14 +6,21 @@ import Stats from 'stats.js'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass'
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass'
 
+import fragmentShader from './shaders/fragment.glsl'
+import vertexShader from './shaders/vertex.glsl'
 import { isMesh, isStandardMaterial } from './utils'
 
 const BLOOM_SCENE = 1
 const bloomLayer = new THREE.Layers()
 bloomLayer.set(BLOOM_SCENE)
+
+const materials: Record<string, THREE.Material | THREE.Material[]> = {}
+const darkMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 })
 
 const stats = new Stats()
 document.body.appendChild(stats.dom)
@@ -32,7 +39,7 @@ gui
 	.max(1000)
 	.step(1)
 	.name('Count')
-	.onFinishChange(initScene)
+	.onFinishChange(generateSpheres)
 
 gui
 	.add(params, 'size')
@@ -40,7 +47,7 @@ gui
 	.max(2)
 	.step(0.1)
 	.name('Size')
-	.onFinishChange(initScene)
+	.onFinishChange(generateSpheres)
 
 gui
 	.add(params, 'spread')
@@ -48,7 +55,7 @@ gui
 	.max(50)
 	.step(0.1)
 	.name('Spread')
-	.onFinishChange(initScene)
+	.onFinishChange(generateSpheres)
 
 const canvas = document.querySelector<HTMLCanvasElement>('canvas.webgl')
 if (!canvas) throw new Error('Canvas not found')
@@ -75,6 +82,9 @@ window.addEventListener('resize', () => {
 
 	renderer.setSize(sizes.width, sizes.height)
 	renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+
+	bloomComposer.setSize(sizes.width, sizes.height)
+	finalComposer.setSize(sizes.width, sizes.height)
 })
 
 const camera = new THREE.PerspectiveCamera(
@@ -85,6 +95,9 @@ const camera = new THREE.PerspectiveCamera(
 )
 
 camera.position.z = 3
+
+const controls = new OrbitControls(camera, canvas)
+controls.enableDamping = true
 
 // const camera = new THREE.OrthographicCamera(
 // 	-sizes.width / 2,
@@ -101,24 +114,46 @@ const renderer = new THREE.WebGLRenderer({
 	canvas,
 })
 renderer.setSize(sizes.width, sizes.height)
-renderer.setClearColor(new THREE.Color('#262837'))
+renderer.setClearColor(new THREE.Color('#010003'))
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+renderer.outputColorSpace = 'srgb'
 
-const effectComposer = new EffectComposer(renderer)
+// effectComposer.renderToScreen = false
 
+const renderPass = new RenderPass(scene, camera)
 // @ts-ignore
 const bloomPass = new UnrealBloomPass()
 
-const renderPass = new RenderPass(scene, camera)
+const bloomComposer = new EffectComposer(renderer)
+bloomComposer.addPass(renderPass)
+bloomComposer.addPass(bloomPass)
 
-effectComposer.addPass(renderPass)
+bloomComposer.renderToScreen = false
 
-effectComposer.addPass(bloomPass)
+gui.add(bloomPass, 'strength').min(0).max(2).step(0.01).name('Strength')
 
-const controls = new OrbitControls(camera, canvas)
-controls.enableDamping = true
+const mixPass = new ShaderPass(
+	new THREE.ShaderMaterial({
+		uniforms: {
+			baseTexture: { value: null },
+			bloomTexture: { value: bloomComposer.renderTarget2.texture },
+		},
 
-function initScene() {
+		vertexShader: vertexShader,
+		fragmentShader: fragmentShader,
+	}),
+	'baseTexture'
+)
+
+const finalComposer = new EffectComposer(renderer)
+
+finalComposer.addPass(renderPass)
+finalComposer.addPass(mixPass)
+
+const outputPass = new OutputPass()
+finalComposer.addPass(outputPass)
+
+function generateSpheres() {
 	scene.traverse(disposeMaterial)
 
 	scene.clear()
@@ -132,24 +167,31 @@ function initScene() {
 
 		const mesh = new THREE.Mesh(geometry, material)
 
+		if (Math.random() > 0.5) {
+			mesh.layers.enable(BLOOM_SCENE)
+		}
+
 		mesh.position.x = (Math.random() - 0.5) * params.spread
 		mesh.position.y = (Math.random() - 0.5) * params.spread
 		mesh.position.z = (Math.random() - 0.5) * params.spread
 
-		mesh.scale.setScalar(Math.random() * params.size)
+		mesh.scale.setScalar(Math.random() * params.size + 0.05)
 
 		scene.add(mesh)
 	}
 }
 
-initScene()
+generateSpheres()
 
 function tick() {
 	stats.begin()
 	controls.update()
 
-	// renderer.render(scene, camera)
-	effectComposer.render()
+	scene.traverse(unBloom)
+	bloomComposer.render()
+
+	scene.traverse(bloom)
+	finalComposer.render()
 
 	stats.end()
 
@@ -161,5 +203,18 @@ tick()
 function disposeMaterial(obj: THREE.Object3D) {
 	if (isMesh(obj) && isStandardMaterial(obj.material)) {
 		obj.material.dispose()
+	}
+}
+
+function unBloom(object: THREE.Object3D) {
+	if (isMesh(object) && !bloomLayer.test(object.layers)) {
+		materials[object.uuid] = object.material
+		object.material = darkMaterial
+	}
+}
+
+function bloom(object: THREE.Object3D) {
+	if (isMesh(object) && !bloomLayer.test(object.layers)) {
+		object.material = materials[object.uuid]
 	}
 }
