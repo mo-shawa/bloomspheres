@@ -4,23 +4,14 @@ import { gen } from 'culler'
 import { GUI } from 'lil-gui'
 import Stats from 'stats.js'
 import * as THREE from 'three'
+import { RenderPass } from 'three/examples/jsm/Addons.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 
-import fragmentShader from './shaders/fragment.glsl'
-import vertexShader from './shaders/vertex.glsl'
-import { isMesh, isStandardMaterial } from './utils'
+import * as TWEEN from '@tweenjs/tween.js'
 
-const BLOOM_SCENE = 1
-const bloomLayer = new THREE.Layers()
-bloomLayer.set(BLOOM_SCENE)
-
-const materials: Record<string, THREE.Material | THREE.Material[]> = {}
-const darkMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 })
+import { setNormalEmissive } from './utils'
 
 const stats = new Stats()
 document.body.appendChild(stats.dom)
@@ -73,17 +64,11 @@ window.addEventListener('resize', () => {
 
 	camera.aspect = sizes.width / sizes.height
 
-	// camera.left = -sizes.width / 2
-	// camera.right = sizes.width / 2
-	// camera.top = sizes.height / 2
-	// camera.bottom = -sizes.height / 2
-
 	camera.updateProjectionMatrix()
 
 	renderer.setSize(sizes.width, sizes.height)
 	renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 
-	bloomComposer.setSize(sizes.width, sizes.height)
 	finalComposer.setSize(sizes.width, sizes.height)
 })
 
@@ -99,70 +84,43 @@ camera.position.z = 3
 const controls = new OrbitControls(camera, canvas)
 controls.enableDamping = true
 
-// const camera = new THREE.OrthographicCamera(
-// 	-sizes.width / 2,
-// 	sizes.width / 2,
-// 	sizes.height / 2,
-// 	-sizes.height / 2,
-// 	0.1,
-// 	100
-// ) // interesting
-
-// camera.position.z = 0
-
 const renderer = new THREE.WebGLRenderer({
 	canvas,
 })
 renderer.setSize(sizes.width, sizes.height)
 renderer.setClearColor(new THREE.Color('#010003'))
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-renderer.outputColorSpace = 'srgb'
-
-// effectComposer.renderToScreen = false
+// renderer.outputColorSpace = 'srgb'
 
 const renderPass = new RenderPass(scene, camera)
 // @ts-ignore
-const bloomPass = new UnrealBloomPass()
-
-const bloomComposer = new EffectComposer(renderer)
-bloomComposer.addPass(renderPass)
-bloomComposer.addPass(bloomPass)
-
-bloomComposer.renderToScreen = false
+const bloomPass = new UnrealBloomPass(undefined, 1, 1, 0)
 
 gui.add(bloomPass, 'strength').min(0).max(2).step(0.01).name('Strength')
 
-const mixPass = new ShaderPass(
-	new THREE.ShaderMaterial({
-		uniforms: {
-			baseTexture: { value: null },
-			bloomTexture: { value: bloomComposer.renderTarget2.texture },
-		},
-
-		vertexShader: vertexShader,
-		fragmentShader: fragmentShader,
-	}),
-	'baseTexture'
-)
-
 const finalComposer = new EffectComposer(renderer)
-
 finalComposer.addPass(renderPass)
-finalComposer.addPass(mixPass)
-
-const outputPass = new OutputPass()
-finalComposer.addPass(outputPass)
+finalComposer.addPass(bloomPass)
 
 function generateSpheres() {
-	scene.traverse(disposeMaterial)
-
 	scene.clear()
 
 	const geometry = new THREE.IcosahedronGeometry(1, 15)
 
 	for (let i = 0; i < params.count; i++) {
-		const material = new THREE.MeshBasicMaterial({
-			color: new THREE.Color(gen({ type: 'rgb' })),
+		const color = gen({
+			type: 'rgb',
+			minR: 100,
+			minB: 100,
+			minG: 100,
+			maxR: 200,
+			maxB: 200,
+			maxG: 200,
+		})
+
+		const material = new THREE.MeshLambertMaterial({
+			emissive: new THREE.Color(color),
+			emissiveIntensity: 0.2,
 		})
 
 		const mesh = new THREE.Mesh(geometry, material)
@@ -180,6 +138,7 @@ function generateSpheres() {
 generateSpheres()
 
 const raycaster = new THREE.Raycaster()
+raycaster.params.Mesh.threshold = 0.1
 const cursor = new THREE.Vector2()
 
 window.addEventListener('mousemove', (event) => {
@@ -187,34 +146,35 @@ window.addEventListener('mousemove', (event) => {
 	cursor.y = -(event.clientY / sizes.height) * 2 + 1
 })
 
-window.addEventListener('click', () => {
-	raycaster.setFromCamera(cursor, camera)
-
-	const intersects = raycaster.intersectObjects(scene.children)
-
-	if (intersects.length > 0) {
-		const object = intersects[0].object as THREE.Mesh
-		object.layers.toggle(BLOOM_SCENE)
-	}
-})
-
 function tick() {
 	stats.begin()
 	controls.update()
 
-	scene.traverse(unBloom)
-	bloomComposer.render()
-
-	scene.traverse(bloom)
+	// renderer.render(scene, camera)
 	finalComposer.render()
 
 	raycaster.setFromCamera(cursor, camera)
+	TWEEN.update()
 
 	const intersects = raycaster.intersectObjects(scene.children)
 
+	// if (intersects.length > 0) {
+	// 	scene.traverse(setNormalEmissive)
+	// 	intersects.forEach((intersect) => {
+	// 		const object = intersect.object as THREE.Mesh
+	// 		const material = object.material as THREE.MeshStandardMaterial
+	// 		material.emissiveIntensity = 15
+	// 	})
+	// }
+
 	if (intersects.length > 0) {
 		const object = intersects[0].object as THREE.Mesh
-		object.layers.toggle(BLOOM_SCENE)
+		const material = object.material as THREE.MeshStandardMaterial
+		new TWEEN.Tween(material)
+			.to({ emissiveIntensity: 8 }, 1000)
+			.chain(new TWEEN.Tween(material).to({ emissiveIntensity: 2 }, 1000))
+			.easing(TWEEN.Easing.Bounce.InOut)
+			.start()
 	}
 
 	stats.end()
@@ -223,22 +183,3 @@ function tick() {
 }
 
 tick()
-
-function disposeMaterial(obj: THREE.Object3D) {
-	if (isMesh(obj) && isStandardMaterial(obj.material)) {
-		obj.material.dispose()
-	}
-}
-
-function unBloom(object: THREE.Object3D) {
-	if (isMesh(object) && !bloomLayer.test(object.layers)) {
-		materials[object.uuid] = object.material
-		object.material = darkMaterial
-	}
-}
-
-function bloom(object: THREE.Object3D) {
-	if (isMesh(object) && !bloomLayer.test(object.layers)) {
-		object.material = materials[object.uuid]
-	}
-}
