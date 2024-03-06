@@ -11,15 +11,13 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 
 import * as TWEEN from '@tweenjs/tween.js'
 
-import { setNormalEmissive } from './utils'
-
 const stats = new Stats()
 document.body.appendChild(stats.dom)
 
 const params = {
-	count: 100,
+	count: 1000,
 	size: 0.1,
-	spread: 2,
+	spread: 10,
 }
 
 const gui = new GUI()
@@ -27,7 +25,7 @@ const gui = new GUI()
 gui
 	.add(params, 'count')
 	.min(1)
-	.max(1000)
+	.max(5000)
 	.step(1)
 	.name('Count')
 	.onFinishChange(generateSpheres)
@@ -83,6 +81,8 @@ camera.position.z = 3
 
 const controls = new OrbitControls(camera, canvas)
 controls.enableDamping = true
+controls.autoRotate = true
+controls.autoRotateSpeed = 0.3
 
 const renderer = new THREE.WebGLRenderer({
 	canvas,
@@ -93,8 +93,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 // renderer.outputColorSpace = 'srgb'
 
 const renderPass = new RenderPass(scene, camera)
-// @ts-ignore
-const bloomPass = new UnrealBloomPass(undefined, 1, 1, 0)
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(), 1, 1, 0)
 
 gui.add(bloomPass, 'strength').min(0).max(2).step(0.01).name('Strength')
 
@@ -158,21 +157,12 @@ function tick() {
 
 	const intersects = raycaster.intersectObjects(scene.children)
 
-	// if (intersects.length > 0) {
-	// 	scene.traverse(setNormalEmissive)
-	// 	intersects.forEach((intersect) => {
-	// 		const object = intersect.object as THREE.Mesh
-	// 		const material = object.material as THREE.MeshStandardMaterial
-	// 		material.emissiveIntensity = 15
-	// 	})
-	// }
-
 	if (intersects.length > 0) {
 		const object = intersects[0].object as THREE.Mesh
 		const material = object.material as THREE.MeshStandardMaterial
 		new TWEEN.Tween(material)
 			.to({ emissiveIntensity: 8 }, 1000)
-			.chain(new TWEEN.Tween(material).to({ emissiveIntensity: 2 }, 1000))
+			.chain(new TWEEN.Tween(material).to({ emissiveIntensity: 0.2 }, 10000))
 			.easing(TWEEN.Easing.Bounce.InOut)
 			.start()
 	}
