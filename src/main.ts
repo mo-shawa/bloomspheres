@@ -18,6 +18,7 @@ const params = {
 	count: 1000,
 	size: 0.1,
 	spread: 10,
+	emissiveIntensity: 3,
 }
 
 const gui = new GUI()
@@ -45,6 +46,13 @@ gui
 	.step(0.1)
 	.name('Spread')
 	.onFinishChange(generateSpheres)
+
+gui
+	.add(params, 'emissiveIntensity')
+	.min(0.1)
+	.max(10)
+	.step(0.1)
+	.name('Emissive Intensity')
 
 const canvas = document.querySelector<HTMLCanvasElement>('canvas.webgl')
 if (!canvas) throw new Error('Canvas not found')
@@ -117,9 +125,8 @@ function generateSpheres() {
 			maxG: 200,
 		})
 
-		const material = new THREE.MeshLambertMaterial({
-			emissive: new THREE.Color(color),
-			emissiveIntensity: 0.2,
+		const material = new THREE.MeshBasicMaterial({
+			color: new THREE.Color(color),
 		})
 
 		const mesh = new THREE.Mesh(geometry, material)
@@ -160,9 +167,17 @@ function tick() {
 	if (intersects.length > 0) {
 		const object = intersects[0].object as THREE.Mesh
 		const material = object.material as THREE.MeshStandardMaterial
+
+		const originalColor = { ...material.color }
+		const emissiveColor = { ...originalColor }
+
+		emissiveColor.r *= params.emissiveIntensity
+		emissiveColor.g *= params.emissiveIntensity
+		emissiveColor.b *= params.emissiveIntensity
+
 		new TWEEN.Tween(material)
-			.to({ emissiveIntensity: 8 }, 1000)
-			.chain(new TWEEN.Tween(material).to({ emissiveIntensity: 0.2 }, 10000))
+			.to({ color: emissiveColor }, 1000)
+			.chain(new TWEEN.Tween(material).to({ color: originalColor }, 10000))
 			.easing(TWEEN.Easing.Bounce.InOut)
 			.start()
 	}
